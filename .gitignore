@@ -1,0 +1,6 @@
+db/
+incremental_db/
+cpu_top.*
+!cpu_top.qsf
+AGENTS.md
+c5_pin_model_dump.txt
