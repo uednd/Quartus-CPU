@@ -1,0 +1,8 @@
+db/
+incremental_db/
+cpu_top.*
+!cpu_top.bdf
+!cpu_top.qsf
+!cpu_top.cdf
+!cpu_top.sof
+c5_pin_model_dump.txt

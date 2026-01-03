@@ -1,0 +1,99 @@
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity tb_cpu_core is
+end entity;
+
+architecture tb of tb_cpu_core is
+  signal clk     : std_logic := '0';
+  signal reset_n : std_logic := '0';
+
+  signal pc_out    : std_logic_vector(15 downto 0); -- 调试用 PC
+  signal ir_out    : std_logic_vector(15 downto 0); -- 调试用 IR
+  signal r0_out    : std_logic_vector(15 downto 0); -- 调试用 R0
+  signal r1_out    : std_logic_vector(15 downto 0); -- 调试用 R1
+  signal r2_out    : std_logic_vector(15 downto 0); -- 调试用 R2
+  signal r3_out    : std_logic_vector(15 downto 0); -- 调试用 R3
+  signal alu_out   : std_logic_vector(15 downto 0); -- 调试用 ALU
+  signal mem_q_out : std_logic_vector(15 downto 0); -- 调试用 RAM 输出
+  signal disp_out  : std_logic_vector(15 downto 0); -- 调试用 DISP
+  signal halted    : std_logic;                     -- 停机标志
+
+  -- 单步检查：在上升沿后比对 PC 与寄存器
+  procedure step_check(
+    constant exp_pc : std_logic_vector(15 downto 0);
+    constant exp_r1 : std_logic_vector(15 downto 0);
+    constant exp_r2 : std_logic_vector(15 downto 0);
+    constant exp_r3 : std_logic_vector(15 downto 0)
+  ) is
+  begin
+    wait until rising_edge(clk);
+    assert pc_out = exp_pc report "PC mismatch" severity error;
+    assert r1_out = exp_r1 report "R1 mismatch" severity error;
+    assert r2_out = exp_r2 report "R2 mismatch" severity error;
+    assert r3_out = exp_r3 report "R3 mismatch" severity error;
+  end procedure;
+
+begin
+  clk <= not clk after 10 ns;
+
+  dut: entity work.cpu_core
+    port map(
+      clk       => clk,
+      reset_n   => reset_n,
+      pc_out    => pc_out,
+      ir_out    => ir_out,
+      r0_out    => r0_out,
+      r1_out    => r1_out,
+      r2_out    => r2_out,
+      r3_out    => r3_out,
+      alu_out   => alu_out,
+      mem_q_out => mem_q_out,
+      disp_out  => disp_out,
+      halted    => halted
+    );
+
+  stim: process
+  begin
+    reset_n <= '0';
+    wait for 100 ns;
+    reset_n <= '1';
+
+    -- 每个 step_check 检查的是“该周期执行完后”的寄存器与PC：
+    -- pc_out 输出与 ir_out 对齐的 PC（即该周期执行的指令地址），不是 PC+1
+    step_check(x"0000", x"0005", x"0000", x"0000"); -- after ADDI R1
+    step_check(x"0001", x"0005", x"0003", x"0000"); -- after ADDI R2
+    step_check(x"0002", x"0005", x"0003", x"0008"); -- after ADD
+    step_check(x"0003", x"0005", x"0003", x"0005"); -- after SUB
+    step_check(x"0004", x"0005", x"0003", x"0007"); -- after OR
+    step_check(x"0005", x"0005", x"0003", x"0001"); -- after AND
+    step_check(x"0006", x"0005", x"0003", x"0028"); -- after SLLV (40)
+    step_check(x"0007", x"0005", x"0003", x"0005"); -- after SRLV
+    step_check(x"0008", x"0005", x"8000", x"0005"); -- after LUI
+    step_check(x"0009", x"0005", x"8000", x"FC00"); -- after SRAV
+    step_check(x"000A", x"0001", x"8000", x"FC00"); -- after SLT -> R1=1
+    step_check(x"000B", x"0001", x"8000", x"FC00"); -- after ANDI
+    step_check(x"000C", x"0011", x"8000", x"FC00"); -- after ORI -> R1=0x11
+    step_check(x"000D", x"0011", x"8000", x"FC00"); -- after SW (regs unchanged)
+    step_check(x"000E", x"0011", x"0011", x"FC00"); -- after LW -> R2=0x11
+    -- BEQ at PC=0x000F, taken to 0x0012
+    step_check(x"000F", x"0011", x"0011", x"FC00"); -- after BEQ
+    step_check(x"0012", x"0011", x"0011", x"FFFF"); -- after ADDI -1
+    -- BNE at 0x0013, taken to 0x0015
+    step_check(x"0013", x"0011", x"0011", x"FFFF"); -- after BNE
+    -- BGT at 0x0015, taken to 0x0017
+    step_check(x"0015", x"0011", x"0011", x"FFFF"); -- after BGT
+    -- JMP at 0x0017 -> 0x0019
+    step_check(x"0017", x"0011", x"0011", x"FFFF"); -- after JMP
+    step_check(x"0019", x"0011", x"0011", x"FFFF"); -- after DISP (disp_out should be 0x0011)
+    wait until rising_edge(clk); -- execute HALT
+    assert halted='1' report "HALT not asserted" severity error;
+    assert pc_out = x"001A" report "PC mismatch (HALT)" severity error;
+    assert disp_out = x"0011" report "DISP output mismatch" severity error;
+
+    wait for 100 ns;
+    assert false report "Simulation finished OK." severity failure;
+  end process;
+
+end architecture;
